@@ -1,3 +1,4 @@
+import os
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import get_jwt_identity
 from datetime import datetime
@@ -64,6 +65,7 @@ def modify_drive(drive_id):
         db.session.commit()
         return jsonify({"msg": "Placement drive deleted successfully"}), 200
 
+    # Edit Logic
     if drive.status != 'Pending':
         return jsonify({"msg": "Only 'Pending' drives can be modified."}), 403
 
@@ -72,9 +74,10 @@ def modify_drive(drive_id):
         if 'job_title' in data: drive.job_title = data['job_title']
         if 'job_description' in data: drive.job_description = data['job_description']
         if 'eligibility_branch' in data: drive.eligibility_branch = data['eligibility_branch']
-        if 'eligibility_cgpa' in data and data['eligibility_cgpa'] is not None: drive.eligibility_cgpa = float(data['eligibility_cgpa'])
-        if 'eligibility_year' in data and data['eligibility_year'] is not None: drive.eligibility_year = int(data['eligibility_year'])
-        if 'application_deadline' in data: drive.application_deadline = datetime.fromisoformat(data['application_deadline'].replace("Z", "+00:00"))
+        if 'eligibility_cgpa' in data: 
+            drive.eligibility_cgpa = float(data['eligibility_cgpa']) if data['eligibility_cgpa'] else None
+        if 'application_deadline' in data: 
+            drive.application_deadline = datetime.fromisoformat(data['application_deadline'].replace("Z", "+00:00"))
         
         db.session.commit()
         return jsonify({"msg": "Placement drive updated successfully"}), 200
@@ -90,13 +93,16 @@ def get_company_drives():
     
     drives_data = []
     for drive in drives:
-        applicant_count = len(drive.applications) # Added applicant count
         drives_data.append({
             "drive_id": drive.id,
             "job_title": drive.job_title,
             "status": drive.status,
-            "applicant_count": applicant_count,
+            "applicant_count": len(drive.applications),
             "application_deadline": drive.application_deadline.isoformat(),
+            # Sending these fields for the Edit Modal
+            "job_description": drive.job_description,
+            "eligibility_branch": drive.eligibility_branch,
+            "eligibility_cgpa": drive.eligibility_cgpa
         })
     return jsonify({"drives": drives_data}), 200
 
@@ -113,10 +119,14 @@ def get_drive_applications(drive_id):
     applications_data = []
     for app in applications:
         student = app.student_profile
+        # Extract filename from the full path for the frontend link
+        resume_filename = os.path.basename(student.resume_path) if student.resume_path else None
+        
         applications_data.append({
             "application_id": app.id,
             "student_username": student.user.username,
             "status": app.status,
+            "resume_filename": resume_filename, # Added for Resume View
             "interview_date": app.interview_date.isoformat() if app.interview_date else None
         })
     return jsonify({"applications": applications_data}), 200
@@ -175,6 +185,10 @@ def generate_offer_letter(application_id):
         f"Company: {company.company_name}\n"
         f"Student: {student.user.username}\n"
         f"Role: {application.drive.job_title}\n"
-        f"Congratulations! You have been selected for the role."
+        f"Date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
+        f"Dear {student.user.username},\n\n"
+        f"We are pleased to offer you the position of {application.drive.job_title} at {company.company_name}.\n"
+        f"We were impressed with your skills and believe you will be a valuable asset to our team.\n\n"
+        f"Sincerely,\nHR Department, {company.company_name}"
     )
     return jsonify({"offer_letter": offer_letter_text}), 200

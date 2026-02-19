@@ -1,11 +1,13 @@
 import os
-from flask import Blueprint, request, jsonify, current_app
+import glob
+from flask import Blueprint, request, jsonify, current_app, send_from_directory
 from werkzeug.utils import secure_filename
 from flask_jwt_extended import get_jwt_identity
 from datetime import datetime, timezone
 from models import db, StudentProfile, PlacementDrive, Application, CompanyProfile
 from utils.decorators import student_required
 from tasks import export_applications_csv
+from extensions import cache
 
 student_bp = Blueprint('student', __name__, url_prefix='/api/student')
 
@@ -47,31 +49,46 @@ def upload_resume():
 
 @student_bp.route('/drives', methods=['GET'])
 @student_required
+@cache.cached(timeout=60, query_string=True)
 def get_approved_drives():
     student = get_current_student()
     now = datetime.now(timezone.utc)
     
-    query = PlacementDrive.query.filter(
+    # 1. Fetch ALL active approved drives
+    drives = PlacementDrive.query.filter(
         PlacementDrive.status == 'Approved',
         PlacementDrive.application_deadline > now
-    )
+    ).order_by(PlacementDrive.application_deadline.asc()).all()
     
-    # Eligibility based filtering & searching
-    search = request.args.get('q')
-    if search:
-        query = query.filter(PlacementDrive.job_title.ilike(f'%{search}%'))
-        
-    drives = query.order_by(PlacementDrive.application_deadline.asc()).all()
+    search_query = request.args.get('q', '').lower()
     
     drives_data = []
     for drive in drives:
+        # 2. FILTER: Search Query
+        if search_query and search_query not in drive.job_title.lower():
+            continue
+
+        # 3. FILTER: Check Eligibility (The Logic You Needed)
+        # If drive has a branch requirement, student must match it
+        if drive.eligibility_branch and drive.eligibility_branch.lower() != student.branch.lower():
+            continue
+            
+        # If drive has a CGPA requirement, student must meet it
+        if drive.eligibility_cgpa is not None and student.cgpa < drive.eligibility_cgpa:
+            continue
+        
+        # Safe Company Name Fetch
+        company = CompanyProfile.query.get(drive.company_id)
+            
         drives_data.append({
             "drive_id": drive.id,
             "job_title": drive.job_title,
+            "company_name": company.company_name if company else "Unknown",
             "eligibility_branch": drive.eligibility_branch,
             "eligibility_cgpa": drive.eligibility_cgpa,
             "application_deadline": drive.application_deadline.isoformat()
         })
+        
     return jsonify({"drives": drives_data}), 200
 
 @student_bp.route('/search/companies', methods=['GET'])
@@ -100,7 +117,7 @@ def apply_to_drive(drive_id):
     if not drive or drive.status != 'Approved':
         return jsonify({"msg": "Drive not found or not approved"}), 404
 
-    # Strict Eligibility Logic
+    # Double-check eligibility on Apply (Security Best Practice)
     if drive.eligibility_branch and drive.eligibility_branch.lower() != student.branch.lower():
         return jsonify({"msg": "Branch eligibility not met"}), 403
     if drive.eligibility_cgpa is not None and student.cgpa < drive.eligibility_cgpa:
@@ -124,7 +141,8 @@ def get_student_applications():
         applications_data.append({
             "application_id": app.id,
             "job_title": app.drive.job_title if app.drive else None,
-            "status": app.status
+            "status": app.status,
+            "application_date": app.application_date.isoformat()
         })
     return jsonify({"applications": applications_data}), 200
 
@@ -132,8 +150,18 @@ def get_student_applications():
 @student_required
 def trigger_history_export():
     student = get_current_student()
-    
-    # Trigger the batch job asynchronously [cite: 132]
     export_applications_csv.delay(student.id, student.user.username)
+    return jsonify({"msg": "Batch job triggered. Please wait a few seconds and refresh to download."}), 202
+
+@student_bp.route('/exports', methods=['GET'])
+@student_required
+def get_my_exports():
+    student = get_current_student()
+    username = student.user.username
+    upload_folder = os.path.join(current_app.config['BASE_DIR'], 'uploads')
     
-    return jsonify({"msg": "Batch job triggered. You will receive an alert once the CSV export is done."}), 202
+    files = glob.glob(os.path.join(upload_folder, f"export_{username}_*.csv"))
+    files.sort(key=os.path.getmtime, reverse=True)
+    
+    export_files = [os.path.basename(f) for f in files]
+    return jsonify({"files": export_files}), 200

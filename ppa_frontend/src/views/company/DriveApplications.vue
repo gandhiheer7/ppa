@@ -9,6 +9,7 @@
           <tr>
             <th>Student Name</th>
             <th>Applied Date</th>
+            <th>Resume</th>
             <th>Status</th>
             <th>Action</th>
           </tr>
@@ -16,25 +17,37 @@
         <tbody>
           <tr v-for="app in applications" :key="app.application_id">
             <td>{{ app.student_username }}</td>
-            <td>{{ new Date(app.application_date).toLocaleDateString() }}</td>
+            <td>{{ app.application_date ? new Date(app.application_date).toLocaleDateString() : 'N/A' }}</td>
+            <td>
+              <a v-if="app.resume_filename" 
+                 :href="getResumeUrl(app.resume_filename)" 
+                 target="_blank" 
+                 class="btn btn-sm btn-info text-white">
+                 View Resume
+              </a>
+              <span v-else class="text-muted small">No Resume</span>
+            </td>
             <td>
               <span :class="getStatusClass(app.status)" class="badge">{{ app.status }}</span>
             </td>
             <td>
-              <div v-if="app.status === 'Applied'">
+              <div v-if="app.status === 'Applied'" class="btn-group">
                 <button @click="shortlist(app.application_id)" class="btn btn-sm btn-primary">Shortlist</button>
               </div>
-              <div v-else-if="app.status === 'Shortlisted'">
-                <button @click="updateStatus(app.application_id, 'Selected')" class="btn btn-sm btn-success me-1">Select</button>
+              <div v-else-if="app.status === 'Shortlisted'" class="btn-group">
+                <button @click="updateStatus(app.application_id, 'Selected')" class="btn btn-sm btn-success">Select</button>
                 <button @click="updateStatus(app.application_id, 'Rejected')" class="btn btn-sm btn-danger">Reject</button>
               </div>
+              <div v-else-if="app.status === 'Selected'">
+                <button @click="generateOffer(app.application_id)" class="btn btn-sm btn-warning text-dark">Offer Letter</button>
+              </div>
               <div v-else class="text-muted small">
-                No actions available
+                Closed
               </div>
             </td>
           </tr>
           <tr v-if="applications.length === 0">
-            <td colspan="4" class="text-center">No applications received yet.</td>
+            <td colspan="5" class="text-center">No applications received yet.</td>
           </tr>
         </tbody>
       </table>
@@ -64,6 +77,10 @@ export default {
         alert('Failed to load applications');
       }
     },
+    getResumeUrl(filename) {
+      // Points to the static route we added in backend/app.py
+      return `http://localhost:5000/uploads/${filename}`;
+    },
     async shortlist(appId) {
       try {
         await api.post(`/company/applications/${appId}/shortlist`);
@@ -78,6 +95,19 @@ export default {
         this.loadApps();
       } catch (err) {
         alert('Update failed');
+      }
+    },
+    async generateOffer(appId) {
+      try {
+        const res = await api.get(`/company/applications/${appId}/offer-letter`);
+        // Simple download trigger
+        const blob = new Blob([res.data.offer_letter], { type: 'text/plain' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `Offer_Letter_${appId}.txt`;
+        link.click();
+      } catch (err) {
+        alert('Failed to generate offer letter');
       }
     },
     getStatusClass(status) {

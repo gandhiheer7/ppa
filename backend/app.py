@@ -1,7 +1,7 @@
 import os
 import logging
 from logging.handlers import RotatingFileHandler
-from flask import Flask
+from flask import Flask, send_from_directory
 from config import Config
 from extensions import db, jwt, cors, cache, celery_app
 from models import create_admin_if_not_exists
@@ -16,6 +16,7 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
+    # Ensure directories exist
     os.makedirs(os.path.join(app.config['BASE_DIR'], 'instance'), exist_ok=True)
     os.makedirs(os.path.join(app.config['BASE_DIR'], 'uploads'), exist_ok=True)
 
@@ -38,6 +39,12 @@ def create_app(config_class=Config):
     app.register_blueprint(student_bp)
 
     register_error_handlers(app)
+
+    # --- NEW: Route to serve uploaded resumes ---
+    @app.route('/uploads/<path:filename>')
+    def serve_uploaded_file(filename):
+        upload_dir = os.path.join(app.config['BASE_DIR'], 'uploads')
+        return send_from_directory(upload_dir, filename)
 
     with app.app_context():
         db.create_all()

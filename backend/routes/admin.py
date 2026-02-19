@@ -3,7 +3,7 @@ from models import db, User, CompanyProfile, StudentProfile, PlacementDrive, App
 from utils.decorators import admin_required
 from extensions import cache
 
-admin_bp = Blueprint('admin', __name__)
+admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
 @admin_bp.route('/dashboard', methods=['GET'])
 @admin_required
@@ -70,7 +70,6 @@ def search_students():
             "username": user.username if user else "Unknown",
             "branch": s.branch,
             "cgpa": s.cgpa,
-            # FIXED: Matching models.py attributes
             "active": user.active_flag if user else False,
             "blacklisted": user.blacklist_flag if user else False
         })
@@ -98,12 +97,35 @@ def search_companies():
             "hr_contact": c.hr_contact,       
             "approval_status": c.approval_status, 
             "status": c.approval_status,      
-            # FIXED: Matching models.py attributes
             "active": user.active_flag if user else False,
             "blacklisted": user.blacklist_flag if user else False
         })
         
     return jsonify({"companies": companies_data}), 200
+
+@admin_bp.route('/search/drives', methods=['GET'])
+@admin_required
+def search_drives():
+    query = request.args.get('q', '')
+    
+    if query:
+        drives = PlacementDrive.query.filter(PlacementDrive.job_title.ilike(f'%{query}%')).all()
+    else:
+        drives = PlacementDrive.query.all()
+        
+    drives_data = []
+    for d in drives:
+        # FIX: Manually fetch company using company_id to avoid crashing if relationship is missing
+        company = CompanyProfile.query.get(d.company_id)
+        
+        drives_data.append({
+            "drive_id": d.id,
+            "job_title": d.job_title,
+            "company_name": company.company_name if company else "Unknown",
+            "status": d.status
+        })
+    
+    return jsonify({"drives": drives_data}), 200
 
 @admin_bp.route('/users/<int:user_id>/blacklist', methods=['POST'])
 @admin_required
@@ -112,7 +134,6 @@ def blacklist_user(user_id):
     if user.role == 'Admin':
         return jsonify({"msg": "Cannot blacklist an Admin"}), 403
         
-    # FIXED: Update specific flags
     user.active_flag = False
     user.blacklist_flag = True
     db.session.commit()
@@ -122,7 +143,6 @@ def blacklist_user(user_id):
 @admin_required
 def reactivate_user(user_id):
     user = User.query.get_or_404(user_id)
-    # FIXED: Update specific flags
     user.active_flag = True
     user.blacklist_flag = False
     db.session.commit()
