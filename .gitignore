@@ -1,0 +1,19 @@
+﻿# --- Python Backend ---
+venv/
+backend/venv/
+__pycache__/
+*.pyc
+instance/
+*.db
+*.sqlite3
+backend/celerybeat-schedule.db
+backend/celerybeat-schedule.dat
+backend/celerybeat-schedule.bak
+
+# --- Vue Frontend ---
+node_modules/
+ppa_frontend/node_modules/
+dist/
+ppa_frontend/dist/
+npm-debug.log
+.DS_Store
